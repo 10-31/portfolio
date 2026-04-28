@@ -1,0 +1,25 @@
+# build / verification helpers, not part of the deployed site
+render_*.py
+compile_check_*.py
+extract_recent_imgs.py
+highlight_nt_pdf.py
+*.pyc
+__pycache__/
+
+# local preview screenshots produced by the render scripts
+diagram_preview_*.png
+case02_screens_preview.png
+eval_diagram_preview.png
+hero_full.png
+feedback_*.png
+screens_row.png
+codeblock_*.png
+
+# compile-check artifacts
+compile_check_golden.jsonl
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
