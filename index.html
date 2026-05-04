@@ -1059,7 +1059,7 @@
   <div class="wrap">
     <h1 class="reveal">Production <span class="blue em">RAG</span>.<br/>Audit-Ready <span class="blue em">Evaluations</span>.<br/>Traceable <span class="blue em">Retrieval</span>.</h1>
     <p class="lede reveal">
-      Two RAG systems shipped at a regulated lottery operator. The customer support agent runs on LangGraph, Pinecone, and OpenAI API, with parallel guardrails on the inbound and answers grounded in retrieved context. The internal document search engine indexes 1,227 private files across PDF, DOCX, XLSX, and PPTX, with format aware chunking and an evaluation gate (Recall@K, MRR, Hit@1, RAGAS faithfulness) for improving retrieval and blocking regression. Based in Seoul. Native English and Korean.
+      Two RAG systems shipped at a regulated lottery operator. The customer support agent runs on LangGraph, Pinecone, and OpenAI API, with concurrent guardrails on the inbound and answers grounded in retrieved context. The internal document search engine indexes 1,227 private files across PDF, DOCX, XLSX, and PPTX, with format aware chunking and an evaluation gate (Recall@K, MRR, Hit@1, RAGAS faithfulness) for improving retrieval and blocking regression. Based in Seoul. Native English and Korean.
     </p>
     <div class="meta-row stagger reveal">
       <div class="col">
@@ -1091,7 +1091,7 @@
 <section id="chatbot">
   <div class="wrap">
     <h2 class="title reveal">LotterySmith <span class="em">Support Agent.</span></h2>
-    <p class="intro reveal">A production RAG agent for customer support. Built on LangGraph, Python, Pinecone, with OpenAI API integrations. Parallel guardrails screen for prompt injection, code injection, and abuse before the model is invoked. Conversations escalate to a human agent when model confidence falls below threshold.</p>
+    <p class="intro reveal">A production RAG agent for customer support. Built on LangGraph, Python, Pinecone, with OpenAI API integrations. Concurrent guardrails screen for prompt injection, code injection, and abuse before the model is invoked. Conversations escalate to a human agent when model confidence falls below threshold.</p>
 
     <div class="diagram-row reveal">
     <div class="diagram-frame reveal">
@@ -1122,20 +1122,20 @@
         </g>
 
         <\!-- INBOUND -->
-        <g data-node data-tip="user message at the top of every turn">
+        <g data-node data-tip="user message at the top of every turn — a pre-flight FastAPI dependency rejects already-blocked IPs upstream of this point">
           <rect x="20" y="140" width="80" height="40" rx="20" fill="#ffffff" stroke="#0A0A0A" stroke-width="1.5"/>
           <text x="60" y="164" text-anchor="middle" font-family="Geist" font-size="11" fill="#0A0A0A">message</text>
         </g>
 
         <!-- ADVISORY CHECKS (checked first, non blocking) -->
-        <g data-node data-tip="advisory checks, non blocking: language, gibberish, IP block lookup">
+        <g data-node data-tip="advisory tier (concurrent in asyncio.gather), non blocking: language detection, gibberish detection">
           <rect x="140" y="120" width="180" height="80" rx="12" fill="#ffffff" stroke="#7FB1D2" stroke-width="1.5"/>
-          <text x="230" y="155" text-anchor="middle" font-family="Geist" font-size="11.5" fill="#1F1F1F">language · gibberish</text>
-          <text x="230" y="174" text-anchor="middle" font-family="Geist" font-size="11.5" fill="#1F1F1F">IP block lookup</text>
+          <text x="230" y="155" text-anchor="middle" font-family="Geist" font-size="11.5" fill="#1F1F1F">language detection</text>
+          <text x="230" y="174" text-anchor="middle" font-family="Geist" font-size="11.5" fill="#1F1F1F">gibberish detection</text>
         </g>
 
         <!-- BLOCKING CHECKS -->
-        <g data-node data-tip="blocking checks: prompt injection, code scanner, regex, profanity, rate limit">
+        <g data-node data-tip="blocking tier (concurrent in asyncio.gather): prompt injection, code scanner, regex, profanity, rate limit">
           <rect x="360" y="120" width="180" height="80" rx="12" fill="#ffffff" stroke="#7FB1D2" stroke-width="1.5"/>
           <text x="450" y="155" text-anchor="middle" font-family="Geist" font-size="11.5" fill="#1F1F1F">prompt inj · code · regex</text>
           <text x="450" y="174" text-anchor="middle" font-family="Geist" font-size="11.5" fill="#1F1F1F">profanity · rate limit</text>
@@ -1268,13 +1268,13 @@
         <p>The agent is a StateGraph: <code>retrieve → check_confidence → generate → check_escalation</code>. Each customer turn pulls top K=4 chunks from Pinecone over <code>bge-m3</code> 1024 dimensional embeddings (cosine). Generation originally ran on <code>Qwen3:8b</code> via Ollama with 5 turn history. Average response time landed around 2 minutes, which was unworkable for live support. The model layer was swapped to the OpenAI API with 10 turn history, dropping average response time to roughly 5 seconds and cutting infrastructure cost by 98% versus the EC2 hosted Ollama alternative. Every response carries retrieval scores and source citations for logging.</p>
         <h3>Constrained low confidence handoff</h3>
         <p>When all retrieval scores fall below threshold, <code>check_confidence</code> sets <code>low_confidence=true</code> and the <code>generate</code> node swaps to a second system prompt that returns only the canned offer "Would you like to connect with a human agent?" The model is structurally prevented from improvising when retrieval has failed.</p>
-        <h3>Two stage guardrails, parallel</h3>
-        <p>All inbound messages run through <code>asyncio.gather</code>. The advisory stage is non blocking and covers language detection, gibberish detection, and IP block lookup. The blocking stage covers LLM Guard prompt injection, a 16 language code scanner, custom exfiltration regex, profanity, and a sliding window rate limit. A blocking violation triggers a 5 minute Redis IP block plus a <code>violations</code> audit row.</p>
+        <h3>Two stage guardrails, concurrent</h3>
+        <p>An upstream FastAPI dependency rejects already-blocked IPs against the Redis blocklist before the request enters the handler. Inside the handler, all checks run concurrently through <code>asyncio.gather</code> and verdicts evaluate in two tiers. The advisory tier is non blocking and covers language detection and gibberish detection. The blocking tier covers LLM Guard prompt injection, a 16 language code scanner, custom exfiltration regex, profanity, and a sliding window rate limit. A blocking hit writes a violation row and triggers a 5 minute Redis IP block.</p>
         <p>The prompt injection scanner produced false positives on legitimate password recovery and login help phrasing ("I forgot my password", "I can't sign in"), so a domain specific allowlist of regex patterns overrides the scanner verdict for those cases. The override is logged with the risk score so the bypass is auditable.</p>
         <h3>Three escalation triggers</h3>
         <p>(1) ≥10 customer turns, (2) explicit human request keyword match, (3) post low confidence affirmation. Confidence threshold (all Pinecone scores &lt; 0.5) surfaces the inline connect to a human agent handoff.</p>
-        <h3>Hardened for enterprise</h3>
-        <p><code>tenacity</code> retries with backoff, <code>asyncio.Semaphore</code> on LLM concurrency, 120s LLM timeout with 504 fallback, scanner pre warming on startup, best effort DB persistence. Documented in a 38 page technical spec.</p>
+        <h3>Resilience patterns</h3>
+        <p><code>tenacity</code> retries with backoff, <code>asyncio.Semaphore</code> on LLM concurrency, 120s LLM timeout with 504 fallback, scanner pre warming on startup, best effort DB persistence. Documented in an internal technical specification.</p>
       </div>
     </div>
 
@@ -1320,8 +1320,8 @@ agent_graph = build_graph()</pre>
     <div class="row">
       <div class="key reveal"><strong>▸</strong> Code · 02</div>
       <div class="body reveal">
-        <h3>Six concurrent checks before the agent runs</h3>
-        <p>All four scanners and the Redis session fetch run inside one <code>asyncio.gather</code>. Sync scanners are pushed to the threadpool with <code>asyncio.to_thread</code> so they don't block the event loop. Verdicts are then evaluated in tier order: advisory checks return canned messages without blocking the IP, hard checks write a violation row and trigger a 5-minute Redis block.</p>
+        <h3>Five concurrent checks plus session fetch</h3>
+        <p>Five guardrail checks (language, gibberish, jailbreak, profanity, rate limit) and the Redis session fetch run inside one <code>asyncio.gather</code>. Sync scanners are pushed to the threadpool with <code>asyncio.to_thread</code> so they don't block the event loop. Verdicts are then evaluated in tier order: advisory checks return canned messages without blocking the IP; blocking checks write a violation row and trigger a 5-minute Redis block.</p>
         <div class="code">
           <div class="code-head"><div class="dots"><span></span><span></span><span></span></div><span>api/chat.py</span><span class="lang">python</span></div>
 <pre><span class="tok-kw">@router.post</span>(<span class="tok-str">"/chat"</span>, response_model=ChatResponse)
@@ -1474,7 +1474,7 @@ return count
 <section id="search">
   <div class="wrap">
     <h2 class="title reveal">Document <span class="em">Search Engine.</span></h2>
-    <p class="intro reveal">A RAG search engine over a thousand private documents across four file types: PDF, DOCX, XLSX, and PPTX. Each format is chunked to preserve its native structure, so a slide stays a slide and a spreadsheet keeps its column headers. Citations link directly to the original source file, which the user can search in place or download. Each pull request runs a golden-set JSONL evaluation (Recall@K, MRR, NDCG, Hit@1, RAGAS) on GitHub Actions, with merges blocked on regression against the main baseline.</p>
+    <p class="intro reveal">A RAG search engine over a thousand private documents across four file types: PDF, DOCX, XLSX, and PPTX. Each format is chunked to preserve its native structure, so a slide stays a slide and a spreadsheet keeps its column headers. Citations link directly to the original source file, which the user can search in place or download. Each pull request runs a golden-set JSONL evaluation (Recall@K, MRR, Hit@1, RAGAS faithfulness) on GitHub Actions, with merges blocked on regression against the main baseline.</p>
 
     <div class="diagram-row reveal">
     <div class="diagram-frame reveal">
@@ -1772,9 +1772,9 @@ return count
             <tr><th>Classification</th><th>Target</th><th>Algorithm</th></tr>
           </thead>
           <tbody>
-            <tr><td>Authentication credentials</td><td style="color: var(--ink-soft);">Passwords</td><td class="algo">bcrypt (SHA-256 family)</td></tr>
+            <tr><td>Authentication credentials</td><td style="color: var(--ink-soft);">Passwords</td><td class="algo">bcrypt</td></tr>
             <tr><td>Identifying information</td><td style="color: var(--ink-soft);">Name, contact, address</td><td class="algo">AES-256-CBC</td></tr>
-            <tr><td>Authentication sessions</td><td style="color: var(--ink-soft);">Login tokens</td><td class="algo">JWT (server unique key)</td></tr>
+            <tr><td>Authentication sessions</td><td style="color: var(--ink-soft);">Login tokens</td><td class="algo">JWT</td></tr>
             <tr><td>Communication security</td><td style="color: var(--ink-soft);">API + web traffic</td><td class="algo">TLS 1.2 / 1.3 end to end</td></tr>
           </tbody>
         </table>
